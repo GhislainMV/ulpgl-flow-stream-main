@@ -1,0 +1,143 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ULPGL Design System - Colors inspired by university logo
+All colors MUST be HSL for consistency */
+
+@layer base {
+  :root {
+    /* ULPGL Brand Colors */
+    --ulpgl-blue: 212 100% 20%;
+    --ulpgl-blue-light: 212 100% 35%;
+    --ulpgl-blue-dark: 212 100% 15%;
+    --ulpgl-gold: 45 100% 50%;
+    --ulpgl-gold-light: 45 100% 65%;
+    
+    /* Base Colors */
+    --background: 0 0% 100%;
+    --foreground: 220 15% 8%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 15% 8%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 15% 8%;
+
+    /* Primary - ULPGL Blue */
+    --primary: var(--ulpgl-blue);
+    --primary-foreground: 0 0% 98%;
+    --primary-hover: var(--ulpgl-blue-light);
+
+    /* Secondary - Light Blue */
+    --secondary: 212 30% 95%;
+    --secondary-foreground: var(--ulpgl-blue-dark);
+
+    --muted: 212 15% 96%;
+    --muted-foreground: 212 10% 45%;
+
+    /* Accent - Gold */
+    --accent: var(--ulpgl-gold);
+    --accent-foreground: 220 15% 8%;
+
+    --destructive: 0 85% 60%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 212 20% 88%;
+    --input: 212 20% 95%;
+    --ring: var(--ulpgl-blue);
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 240 5.3% 26.1%;
+
+    --sidebar-primary: 240 5.9% 10%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 240 4.8% 95.9%;
+
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    --sidebar-border: 220 13% 91%;
+
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    /* Dark theme with ULPGL colors */
+    --background: 220 25% 6%;
+    --foreground: 0 0% 95%;
+
+    --card: 220 20% 8%;
+    --card-foreground: 0 0% 95%;
+
+    --popover: 220 20% 8%;
+    --popover-foreground: 0 0% 95%;
+
+    --primary: var(--ulpgl-blue-light);
+    --primary-foreground: 0 0% 95%;
+    --primary-hover: var(--ulpgl-blue);
+
+    --secondary: 220 15% 12%;
+    --secondary-foreground: 0 0% 95%;
+
+    --muted: 220 15% 10%;
+    --muted-foreground: 220 10% 60%;
+
+    --accent: var(--ulpgl-gold-light);
+    --accent-foreground: 220 25% 6%;
+
+    --destructive: 0 85% 65%;
+    --destructive-foreground: 0 0% 95%;
+
+    --border: 220 15% 15%;
+    --input: 220 15% 12%;
+    --ring: var(--ulpgl-blue-light);
+    
+    --sidebar-background: 220 20% 8%;
+    --sidebar-foreground: 0 0% 90%;
+    --sidebar-primary: var(--ulpgl-blue-light);
+    --sidebar-primary-foreground: 0 0% 95%;
+    --sidebar-accent: 220 15% 12%;
+    --sidebar-accent-foreground: 0 0% 90%;
+    --sidebar-border: 220 15% 15%;
+    --sidebar-ring: var(--ulpgl-blue-light);
+  }
+}
+
+/* Custom gradients and animations */
+@layer base {
+  .gradient-ulpgl {
+    background: linear-gradient(135deg, hsl(var(--ulpgl-blue)), hsl(var(--ulpgl-blue-light)));
+  }
+  
+  .gradient-gold {
+    background: linear-gradient(135deg, hsl(var(--ulpgl-gold)), hsl(var(--ulpgl-gold-light)));
+  }
+  
+  .shadow-ulpgl {
+    box-shadow: 0 10px 30px -10px hsl(var(--ulpgl-blue) / 0.3);
+  }
+  
+  .animate-fade-in {
+    animation: fadeIn 0.5s ease-in-out;
+  }
+  
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
