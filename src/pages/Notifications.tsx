@@ -3,6 +3,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useLanguage } from "@/components/LanguageProvider";
+import { DocumentViewer } from "@/components/DocumentViewer";
+import { SignatureModal } from "@/components/SignatureModal";
+import { toast } from "@/components/ui/use-toast";
+import { useNavigate } from "react-router-dom";
 import { 
   Bell, 
   BellRing, 
@@ -88,8 +92,12 @@ const settings = {
 
 export default function Notifications() {
   const { t } = useLanguage();
+  const navigate = useNavigate();
   const [notificationSettings, setNotificationSettings] = useState(settings);
   const [notifications, setNotifications] = useState(mockNotifications);
+  const [selectedDocument, setSelectedDocument] = useState<any>(null);
+  const [showViewer, setShowViewer] = useState(false);
+  const [showSignatureModal, setShowSignatureModal] = useState(false);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
@@ -148,6 +156,53 @@ export default function Notifications() {
   const markAllAsRead = () => {
     setNotifications(prev => 
       prev.map(notification => ({ ...notification, read: true }))
+    );
+  };
+
+  const handleViewDocument = (notification: any) => {
+    // Créer un objet document basé sur la notification
+    const mockDocument = {
+      id: notification.id,
+      title: notification.document,
+      type: notification.type === "signature_required" ? "Lettre d'honoraires" : "Document",
+      status: notification.type === "signature_required" ? "pending" : "signed",
+      createdAt: notification.timestamp.split('T')[0],
+      createdBy: notification.from,
+      currentStep: notification.message,
+      progress: notification.type === "signature_required" ? 60 : 100,
+      workflow: [
+        { step: "SAF", status: "completed", date: "2024-08-07 09:00" },
+        { step: "Doyen", status: notification.type === "signature_required" ? "pending" : "completed", date: notification.type === "signature_required" ? null : "2024-08-07 11:00" },
+        { step: "SGAC", status: "waiting", date: null },
+        { step: "Recteur", status: "waiting", date: null }
+      ]
+    };
+    
+    setSelectedDocument(mockDocument);
+    
+    if (notification.type === "signature_required") {
+      setShowSignatureModal(true);
+    } else {
+      setShowViewer(true);
+    }
+    
+    // Marquer comme lu
+    markAsRead(notification.id);
+  };
+
+  const handleDocumentSigned = (documentId: string, comments?: string) => {
+    toast({
+      title: "Document signé",
+      description: "Le document a été signé avec succès et transmis à l'étape suivante.",
+    });
+    
+    // Mettre à jour la notification
+    setNotifications(prev => 
+      prev.map(notif => 
+        notif.id === documentId 
+          ? { ...notif, type: "document_signed", title: "Document signé", message: "Vous avez signé ce document" }
+          : notif
+      )
     );
   };
 
@@ -240,7 +295,7 @@ export default function Notifications() {
                       </span>
                       <Button variant="ghost" size="sm" className="h-8 gap-1">
                         <Eye className="h-3 w-3" />
-                        Voir le document
+                        <span onClick={() => handleViewDocument(notification)}>Voir le document</span>
                       </Button>
                     </div>
                   </div>
@@ -288,6 +343,13 @@ export default function Notifications() {
                           </span>
                         </div>
                       )}
+                      
+                      <div className="flex justify-end mt-2">
+                        <Button variant="ghost" size="sm" className="h-8 gap-1">
+                          <Eye className="h-3 w-3" />
+                          <span onClick={() => handleViewDocument(notification)}>Voir le document</span>
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </CardContent>
@@ -327,8 +389,13 @@ export default function Notifications() {
                         {notification.message}
                       </p>
                       
-                      <Button variant="destructive" size="sm" className="mt-2">
-                        Action requise
+                      <Button 
+                        variant="destructive" 
+                        size="sm" 
+                        className="mt-2"
+                        onClick={() => handleViewDocument(notification)}
+                      >
+                        <span>Action requise</span>
                       </Button>
                     </div>
                   </div>
@@ -441,6 +508,27 @@ export default function Notifications() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Document Viewer Modal */}
+      <DocumentViewer
+        document={selectedDocument}
+        isOpen={showViewer}
+        onClose={() => {
+          setShowViewer(false);
+          setSelectedDocument(null);
+        }}
+      />
+
+      {/* Signature Modal */}
+      <SignatureModal
+        document={selectedDocument}
+        isOpen={showSignatureModal}
+        onClose={() => {
+          setShowSignatureModal(false);
+          setSelectedDocument(null);
+        }}
+        onSign={handleDocumentSigned}
+      />
     </div>
   );
 }

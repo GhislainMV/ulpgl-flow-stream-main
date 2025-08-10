@@ -6,6 +6,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useLanguage } from "@/components/LanguageProvider";
+import { toast } from "@/components/ui/use-toast";
+import { useNavigate } from "react-router-dom";
 import { FileText, Users, Download, Send, PenTool, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
@@ -59,6 +61,7 @@ const allRoles = [
 
 export default function CreateDocument() {
   const { t } = useLanguage();
+  const navigate = useNavigate();
   const [selectedType, setSelectedType] = useState("");
   const [formData, setFormData] = useState({
     title: "",
@@ -77,8 +80,69 @@ export default function CreateDocument() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("Document creation:", { selectedType, formData });
-    // TODO: Implement document creation logic
+    
+    if (!selectedType) {
+      toast({
+        title: "Erreur",
+        description: "Veuillez sélectionner un type de document.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    if (!formData.title.trim()) {
+      toast({
+        title: "Erreur",
+        description: "Veuillez saisir un titre pour le document.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Simuler la création du document
+    toast({
+      title: "Document créé avec succès",
+      description: `Le document "${formData.title}" a été créé et sauvegardé en brouillon.`,
+    });
+    
+    // Rediriger vers la liste des documents
+    setTimeout(() => {
+      navigate("/documents");
+    }, 1500);
+  };
+
+  const handleSendDocument = () => {
+    if (!selectedType || !formData.title.trim()) {
+      toast({
+        title: "Erreur",
+        description: "Veuillez compléter les champs obligatoires.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    toast({
+      title: "Document envoyé",
+      description: `Le document "${formData.title}" a été créé et envoyé pour signature.`,
+    });
+    
+    setTimeout(() => {
+      navigate("/documents");
+    }, 1500);
+  };
+
+  const handleSaveDraft = () => {
+    toast({
+      title: "Brouillon sauvegardé",
+      description: "Le document a été sauvegardé en brouillon.",
+    });
+  };
+
+  const handleAddSignature = () => {
+    toast({
+      title: "Fonctionnalité en développement",
+      description: "La signature numérique sera bientôt disponible.",
+    });
   };
 
   const renderSpecificFields = () => {
@@ -280,17 +344,21 @@ export default function CreateDocument() {
 
                 {/* Actions */}
                 <div className="flex gap-3">
-                  <Button type="submit" variant="ulpgl" className="gap-2">
+                  <Button type="button" onClick={handleSendDocument} variant="ulpgl" className="gap-2">
                     <Send className="h-4 w-4" />
                     Créer et envoyer
                   </Button>
-                  <Button type="button" variant="outline" className="gap-2">
+                  <Button type="button" onClick={handleSaveDraft} variant="outline" className="gap-2">
                     <Download className="h-4 w-4" />
                     Enregistrer brouillon
                   </Button>
-                  <Button type="button" variant="outline" className="gap-2">
+                  <Button type="button" onClick={handleAddSignature} variant="outline" className="gap-2">
                     <PenTool className="h-4 w-4" />
                     Ajouter signature
+                  </Button>
+                  <Button type="submit" variant="outline" className="gap-2">
+                    <FileText className="h-4 w-4" />
+                    Sauvegarder
                   </Button>
                 </div>
               </form>
