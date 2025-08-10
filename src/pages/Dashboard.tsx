@@ -3,6 +3,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useLanguage } from "@/components/LanguageProvider";
+import { DocumentViewer } from "@/components/DocumentViewer";
+import { SignatureModal } from "@/components/SignatureModal";
+import { toast } from "@/components/ui/use-toast";
+import { useNavigate } from "react-router-dom";
 import { 
   FileText, 
   Plus, 
@@ -79,6 +83,11 @@ const stats = [
 
 export default function Dashboard() {
   const { t } = useLanguage();
+  const navigate = useNavigate();
+  const [selectedDocument, setSelectedDocument] = useState<any>(null);
+  const [showViewer, setShowViewer] = useState(false);
+  const [showSignatureModal, setShowSignatureModal] = useState(false);
+  const [documents, setDocuments] = useState(mockDocuments);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -93,6 +102,64 @@ export default function Dashboard() {
     }
   };
 
+  const handleViewDocument = (document: any) => {
+    setSelectedDocument(document);
+    setShowViewer(true);
+  };
+
+  const handleDownloadDocument = (document: any) => {
+    const link = document.createElement('a');
+    link.href = '#';
+    link.download = `${document.title}.pdf`;
+    link.click();
+    
+    toast({
+      title: "Téléchargement commencé",
+      description: `Le document "${document.title}" est en cours de téléchargement.`,
+    });
+  };
+
+  const handleSignDocument = (document: any) => {
+    setSelectedDocument(document);
+    setShowSignatureModal(true);
+  };
+
+  const handleDocumentSigned = (documentId: string, comments?: string) => {
+    setDocuments(prev => 
+      prev.map(doc => 
+        doc.id === documentId 
+          ? { 
+              ...doc, 
+              status: "signed", 
+              progress: Math.min(doc.progress + 25, 100),
+              currentStep: doc.progress >= 75 ? "Terminé" : "En attente signature suivante"
+            }
+          : doc
+      )
+    );
+  };
+
+  const handleQuickAction = (actionType: string) => {
+    switch (actionType) {
+      case "releve_notes":
+        navigate("/create-document");
+        break;
+      case "lettre_honoraires":
+        navigate("/create-document");
+        break;
+      case "pv_conseil":
+        navigate("/create-document");
+        break;
+      case "users":
+        navigate("/users");
+        break;
+      default:
+        toast({
+          title: "Action en cours de développement",
+          description: "Cette fonctionnalité sera bientôt disponible.",
+        });
+    }
+  };
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
@@ -105,7 +172,7 @@ export default function Dashboard() {
         </div>
         <Button variant="ulpgl" className="gap-2">
           <Plus className="h-4 w-4" />
-          {t("createDocument")}
+          <span onClick={() => navigate("/create-document")}>{t("createDocument")}</span>
         </Button>
       </div>
 
@@ -166,12 +233,18 @@ export default function Dashboard() {
                   <div className="flex items-center gap-2 mt-3">
                     <Button variant="ghost" size="sm" className="h-8 gap-1">
                       <Eye className="h-3 w-3" />
-                      {t("view")}
+                      <span onClick={() => handleViewDocument(doc)}>{t("view")}</span>
                     </Button>
                     <Button variant="ghost" size="sm" className="h-8 gap-1">
                       <Download className="h-3 w-3" />
-                      {t("download")}
+                      <span onClick={() => handleDownloadDocument(doc)}>{t("download")}</span>
                     </Button>
+                    {doc.status === "pending" && (
+                      <Button variant="ghost" size="sm" className="h-8 gap-1">
+                        <CheckCircle2 className="h-3 w-3" />
+                        <span onClick={() => handleSignDocument(doc)}>Signer</span>
+                      </Button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -190,19 +263,19 @@ export default function Dashboard() {
           <CardContent className="space-y-3">
             <Button variant="outline" className="w-full justify-start gap-2">
               <FileText className="h-4 w-4" />
-              Relevé de notes
+              <span onClick={() => handleQuickAction("releve_notes")}>Relevé de notes</span>
             </Button>
             <Button variant="outline" className="w-full justify-start gap-2">
               <FileText className="h-4 w-4" />
-              Lettre d'honoraires
+              <span onClick={() => handleQuickAction("lettre_honoraires")}>Lettre d'honoraires</span>
             </Button>
             <Button variant="outline" className="w-full justify-start gap-2">
               <FileText className="h-4 w-4" />
-              PV Conseil facultaire
+              <span onClick={() => handleQuickAction("pv_conseil")}>PV Conseil facultaire</span>
             </Button>
             <Button variant="outline" className="w-full justify-start gap-2">
               <Users className="h-4 w-4" />
-              Gérer les utilisateurs
+              <span onClick={() => handleQuickAction("users")}>Gérer les utilisateurs</span>
             </Button>
           </CardContent>
         </Card>
@@ -239,6 +312,27 @@ export default function Dashboard() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Document Viewer Modal */}
+      <DocumentViewer
+        document={selectedDocument}
+        isOpen={showViewer}
+        onClose={() => {
+          setShowViewer(false);
+          setSelectedDocument(null);
+        }}
+      />
+
+      {/* Signature Modal */}
+      <SignatureModal
+        document={selectedDocument}
+        isOpen={showSignatureModal}
+        onClose={() => {
+          setShowSignatureModal(false);
+          setSelectedDocument(null);
+        }}
+        onSign={handleDocumentSigned}
+      />
     </div>
   );
 }

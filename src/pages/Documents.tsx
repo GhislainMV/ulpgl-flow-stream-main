@@ -4,6 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useLanguage } from "@/components/LanguageProvider";
+import { DocumentViewer } from "@/components/DocumentViewer";
+import { SignatureModal } from "@/components/SignatureModal";
+import { toast } from "@/components/ui/use-toast";
 import { 
   FileText, 
   Search, 
@@ -93,6 +96,10 @@ export default function Documents() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [selectedDocument, setSelectedDocument] = useState<any>(null);
+  const [showViewer, setShowViewer] = useState(false);
+  const [showSignatureModal, setShowSignatureModal] = useState(false);
+  const [documents, setDocuments] = useState(mockDocuments);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -132,6 +139,60 @@ export default function Documents() {
     return matchesSearch && matchesStatus && matchesType;
   });
 
+  const handleViewDocument = (document: any) => {
+    setSelectedDocument(document);
+    setShowViewer(true);
+  };
+
+  const handleSignDocument = (document: any) => {
+    setSelectedDocument(document);
+    setShowSignatureModal(true);
+  };
+
+  const handleDownloadDocument = (document: any) => {
+    // Simuler le téléchargement
+    const link = document.createElement('a');
+    link.href = '#';
+    link.download = `${document.title}.pdf`;
+    link.click();
+    
+    toast({
+      title: "Téléchargement commencé",
+      description: `Le document "${document.title}" est en cours de téléchargement.`,
+    });
+  };
+
+  const handleSendDocument = (document: any) => {
+    // Mettre à jour le statut du document
+    setDocuments(prev => 
+      prev.map(doc => 
+        doc.id === document.id 
+          ? { ...doc, status: "pending", progress: 25, currentStep: "En attente signature Doyen" }
+          : doc
+      )
+    );
+    
+    toast({
+      title: "Document envoyé",
+      description: `Le document "${document.title}" a été envoyé pour signature.`,
+    });
+  };
+
+  const handleDocumentSigned = (documentId: string, comments?: string) => {
+    // Mettre à jour le statut du document après signature
+    setDocuments(prev => 
+      prev.map(doc => 
+        doc.id === documentId 
+          ? { 
+              ...doc, 
+              status: "signed", 
+              progress: Math.min(doc.progress + 25, 100),
+              currentStep: doc.progress >= 75 ? "Terminé" : "En attente signature suivante"
+            }
+          : doc
+      )
+    );
+  };
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
@@ -259,22 +320,22 @@ export default function Documents() {
                       <DropdownMenuContent align="end">
                         <DropdownMenuItem className="gap-2">
                           <Eye className="h-4 w-4" />
-                          {t("view")}
+                          <span onClick={() => handleViewDocument(doc)}>{t("view")}</span>
                         </DropdownMenuItem>
                         <DropdownMenuItem className="gap-2">
                           <Download className="h-4 w-4" />
-                          {t("download")}
+                          <span onClick={() => handleDownloadDocument(doc)}>{t("download")}</span>
                         </DropdownMenuItem>
                         {doc.status === "pending" && (
                           <DropdownMenuItem className="gap-2">
                             <PenTool className="h-4 w-4" />
-                            {t("sign")}
+                            <span onClick={() => handleSignDocument(doc)}>{t("sign")}</span>
                           </DropdownMenuItem>
                         )}
                         {doc.status === "draft" && (
                           <DropdownMenuItem className="gap-2">
                             <Send className="h-4 w-4" />
-                            Envoyer
+                            <span onClick={() => handleSendDocument(doc)}>Envoyer</span>
                           </DropdownMenuItem>
                         )}
                       </DropdownMenuContent>
@@ -286,6 +347,27 @@ export default function Documents() {
           </Table>
         </CardContent>
       </Card>
+
+      {/* Document Viewer Modal */}
+      <DocumentViewer
+        document={selectedDocument}
+        isOpen={showViewer}
+        onClose={() => {
+          setShowViewer(false);
+          setSelectedDocument(null);
+        }}
+      />
+
+      {/* Signature Modal */}
+      <SignatureModal
+        document={selectedDocument}
+        isOpen={showSignatureModal}
+        onClose={() => {
+          setShowSignatureModal(false);
+          setSelectedDocument(null);
+        }}
+        onSign={handleDocumentSigned}
+      />
     </div>
   );
 }
