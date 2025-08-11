@@ -1,10 +1,13 @@
 import { useState } from "react";
+import { useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useLanguage } from "@/components/LanguageProvider";
 import { DocumentViewer } from "@/components/DocumentViewer";
+import { DocumentUpload } from "@/components/DocumentUpload";
 import { SignatureModal } from "@/components/SignatureModal";
+import { DocumentService, DocumentFile } from "@/lib/documentService";
 import { toast } from "@/components/ui/use-toast";
 import { useNavigate } from "react-router-dom";
 import { 
@@ -19,36 +22,6 @@ import {
   Eye
 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-
-const mockDocuments = [
-  {
-    id: 1,
-    title: "Relevé de notes - Jean KABILA",
-    type: "Relevé de notes",
-    status: "pending",
-    createdAt: "2024-08-07",
-    progress: 60,
-    currentStep: "En attente signature Doyen"
-  },
-  {
-    id: 2,
-    title: "Lettre d'honoraires - Dr. MUKENDI",
-    type: "Lettre d'honoraires", 
-    status: "signed",
-    createdAt: "2024-08-06",
-    progress: 100,
-    currentStep: "Terminé"
-  },
-  {
-    id: 3,
-    title: "PV Conseil Facultaire - Août 2024",
-    type: "PV Conseil",
-    status: "pending",
-    createdAt: "2024-08-05",
-    progress: 25,
-    currentStep: "En attente signature SAF"
-  }
-];
 
 const stats = [
   {
@@ -84,10 +57,28 @@ const stats = [
 export default function Dashboard() {
   const { t } = useLanguage();
   const navigate = useNavigate();
-  const [selectedDocument, setSelectedDocument] = useState<any>(null);
+  const [selectedDocument, setSelectedDocument] = useState<DocumentFile | null>(null);
   const [showViewer, setShowViewer] = useState(false);
   const [showSignatureModal, setShowSignatureModal] = useState(false);
-  const [documents, setDocuments] = useState(mockDocuments);
+  const [documents, setDocuments] = useState<DocumentFile[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    loadRecentDocuments();
+  }, []);
+
+  const loadRecentDocuments = async () => {
+    setIsLoading(true);
+    try {
+      const docs = await DocumentService.getUserDocuments();
+      // Prendre les 3 documents les plus récents
+      setDocuments(docs.slice(0, 3));
+    } catch (error) {
+      console.error('Erreur chargement documents:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -102,41 +93,26 @@ export default function Dashboard() {
     }
   };
 
-  const handleViewDocument = (document: any) => {
+  const handleViewDocument = (document: DocumentFile) => {
     setSelectedDocument(document);
     setShowViewer(true);
   };
 
-  const handleDownloadDocument = (document: any) => {
-    const link = document.createElement('a');
-    link.href = '#';
-    link.download = `${document.title}.pdf`;
-    link.click();
-    
-    toast({
-      title: "Téléchargement commencé",
-      description: `Le document "${document.title}" est en cours de téléchargement.`,
-    });
+  const handleDownloadDocument = (document: DocumentFile) => {
+    DocumentService.downloadDocument(document);
   };
 
-  const handleSignDocument = (document: any) => {
+  const handleSignDocument = (document: DocumentFile) => {
     setSelectedDocument(document);
     setShowSignatureModal(true);
   };
 
   const handleDocumentSigned = (documentId: string, comments?: string) => {
-    setDocuments(prev => 
-      prev.map(doc => 
-        doc.id === documentId 
-          ? { 
-              ...doc, 
-              status: "signed", 
-              progress: Math.min(doc.progress + 25, 100),
-              currentStep: doc.progress >= 75 ? "Terminé" : "En attente signature suivante"
-            }
-          : doc
-      )
-    );
+    DocumentService.updateDocument(documentId, {
+      status: 'signed'
+    });
+    
+    loadRecentDocuments(); // Recharger la liste
   };
 
   const handleQuickAction = (actionType: string) => {
@@ -160,6 +136,11 @@ export default function Dashboard() {
         });
     }
   };
+
+  const handleUploadSuccess = (document: DocumentFile) => {
+    loadRecentDocuments(); // Recharger la liste après upload
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
@@ -170,10 +151,13 @@ export default function Dashboard() {
             Bienvenue dans votre espace de gestion documentaire ULPGL
           </p>
         </div>
-        <Button variant="ulpgl" className="gap-2">
-          <Plus className="h-4 w-4" />
-          <span onClick={() => navigate("/create-document")}>{t("createDocument")}</span>
-        </Button>
+        <div className="flex gap-2">
+          <DocumentUpload onUploadSuccess={handleUploadSuccess} />
+          <Button variant="ulpgl" className="gap-2" onClick={() => navigate("/create-document")}>
+            <Plus className="h-4 w-4" />
+            {t("createDocument")}
+          </Button>
+        </div>
       </div>
 
       {/* Statistics Cards */}
@@ -209,46 +193,52 @@ export default function Dashboard() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {mockDocuments.map((doc) => (
-                <div key={doc.id} className="border rounded-lg p-4 hover:bg-accent/50 transition-colors">
-                  <div className="flex items-center justify-between mb-2">
-                    <h4 className="font-medium text-sm">{doc.title}</h4>
-                    {getStatusBadge(doc.status)}
+            {isLoading ? (
+              <div className="flex items-center justify-center h-32">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {documents.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p>Aucun document récent</p>
+                    <p className="text-sm">Uploadez votre premier document pour commencer</p>
                   </div>
-                  
-                  <div className="flex items-center justify-between text-xs text-muted-foreground mb-3">
-                    <span>{doc.type}</span>
-                    <span>{doc.createdAt}</span>
-                  </div>
+                ) : (
+                  documents.map((doc) => (
+                    <div key={doc.id} className="border rounded-lg p-4 hover:bg-accent/50 transition-colors">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="font-medium text-sm">{doc.title}</h4>
+                        {getStatusBadge(doc.status)}
+                      </div>
+                      
+                      <div className="flex items-center justify-between text-xs text-muted-foreground mb-3">
+                        <span>{doc.document_type}</span>
+                        <span>{new Date(doc.created_at).toLocaleDateString('fr-FR')}</span>
+                      </div>
 
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <span>{doc.currentStep}</span>
-                      <span>{doc.progress}%</span>
+                      <div className="flex items-center gap-2 mt-3">
+                        <Button variant="ghost" size="sm" className="h-8 gap-1" onClick={() => handleViewDocument(doc)}>
+                          <Eye className="h-3 w-3" />
+                          <span>{t("view")}</span>
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-8 gap-1" onClick={() => handleDownloadDocument(doc)}>
+                          <Download className="h-3 w-3" />
+                          <span>{t("download")}</span>
+                        </Button>
+                        {doc.status === "pending_signature" && (
+                          <Button variant="ghost" size="sm" className="h-8 gap-1" onClick={() => handleSignDocument(doc)}>
+                            <CheckCircle2 className="h-3 w-3" />
+                            <span>Signer</span>
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                    <Progress value={doc.progress} className="h-2" />
-                  </div>
-
-                  <div className="flex items-center gap-2 mt-3">
-                    <Button variant="ghost" size="sm" className="h-8 gap-1">
-                      <Eye className="h-3 w-3" />
-                      <span onClick={() => handleViewDocument(doc)}>{t("view")}</span>
-                    </Button>
-                    <Button variant="ghost" size="sm" className="h-8 gap-1">
-                      <Download className="h-3 w-3" />
-                      <span onClick={() => handleDownloadDocument(doc)}>{t("download")}</span>
-                    </Button>
-                    {doc.status === "pending" && (
-                      <Button variant="ghost" size="sm" className="h-8 gap-1">
-                        <CheckCircle2 className="h-3 w-3" />
-                        <span onClick={() => handleSignDocument(doc)}>Signer</span>
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+                  ))
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
 

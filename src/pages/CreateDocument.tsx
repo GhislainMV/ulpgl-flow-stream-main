@@ -8,6 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useLanguage } from "@/components/LanguageProvider";
 import { toast } from "@/components/ui/use-toast";
 import { useNavigate } from "react-router-dom";
+import { DocumentUpload } from "@/components/DocumentUpload";
+import { DocumentService } from "@/lib/documentService";
 import { FileText, Users, Download, Send, PenTool, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
@@ -227,6 +229,17 @@ export default function CreateDocument() {
     }
   };
 
+  const handleUploadSuccess = (document: any) => {
+    toast({
+      title: "Document uploadé avec succès",
+      description: `Le document "${document.title}" a été ajouté au système.`,
+    });
+    
+    setTimeout(() => {
+      navigate("/documents");
+    }, 1500);
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
@@ -235,6 +248,9 @@ export default function CreateDocument() {
           <p className="text-muted-foreground">
             Créez un nouveau document administratif avec signature numérique
           </p>
+        </div>
+        <div className="flex gap-2">
+          <DocumentUpload onUploadSuccess={handleUploadSuccess} />
         </div>
       </div>
 

@@ -1,9 +1,12 @@
 import { useState } from "react";
+import { useEffect } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
+import { DocumentService, DocumentFile } from "@/lib/documentService";
+import { toast } from "@/components/ui/use-toast";
 import { 
   FileText, 
   Download, 
@@ -12,16 +15,56 @@ import {
   CheckCircle2, 
   User,
   Calendar,
-  AlertCircle
+  AlertCircle,
+  ExternalLink,
+  Edit
 } from "lucide-react";
 
 interface DocumentViewerProps {
-  document: any;
+  document: DocumentFile | any;
   isOpen: boolean;
   onClose: () => void;
 }
 
 export function DocumentViewer({ document, isOpen, onClose }: DocumentViewerProps) {
+  const [permissions, setPermissions] = useState({
+    canView: false,
+    canEdit: false,
+    canSign: false,
+    canDownload: false
+  });
+  const [documentUrl, setDocumentUrl] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (document?.id && isOpen) {
+      loadDocumentPermissions();
+      loadDocumentUrl();
+    }
+  }, [document?.id, isOpen]);
+
+  const loadDocumentPermissions = async () => {
+    if (!document?.id) return;
+    
+    try {
+      const perms = await DocumentService.checkDocumentPermissions(document.id);
+      setPermissions(perms);
+    } catch (error) {
+      console.error('Erreur chargement permissions:', error);
+    }
+  };
+
+  const loadDocumentUrl = async () => {
+    if (!document?.file_path) return;
+    
+    try {
+      const url = await DocumentService.getDocumentUrl(document.file_path);
+      setDocumentUrl(url);
+    } catch (error) {
+      console.error('Erreur génération URL:', error);
+    }
+  };
+
   if (!document) return null;
 
   const getStatusBadge = (status: string) => {
@@ -40,20 +83,69 @@ export function DocumentViewer({ document, isOpen, onClose }: DocumentViewerProp
   };
 
   const handleDownload = () => {
-    // Simuler le téléchargement
-    const link = document.createElement('a');
-    link.href = '#';
-    link.download = `${document.title}.pdf`;
-    link.click();
-    
-    // Afficher une notification de succès
-    console.log(`Téléchargement de ${document.title} commencé`);
+    if (!permissions.canDownload) {
+      toast({
+        title: "Accès refusé",
+        description: "Vous n'avez pas les permissions pour télécharger ce document.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    DocumentService.downloadDocument(document);
   };
 
   const handleSign = () => {
-    // Ouvrir le modal de signature
+    if (!permissions.canSign) {
+      toast({
+        title: "Signature non autorisée",
+        description: "Ce document n'est pas en attente de votre signature.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     console.log(`Ouverture du modal de signature pour ${document.title}`);
-    // TODO: Implémenter le modal de signature
+  };
+
+  const handleEdit = () => {
+    if (!permissions.canEdit) {
+      toast({
+        title: "Modification non autorisée",
+        description: "Vous n'avez pas les permissions pour modifier ce document.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (documentUrl) {
+      window.open(documentUrl, '_blank');
+      toast({
+        title: "Document ouvert",
+        description: "Le document s'ouvre dans un nouvel onglet pour modification.",
+      });
+    }
+  };
+
+  const handleViewOnline = () => {
+    if (!permissions.canView) {
+      toast({
+        title: "Accès refusé",
+        description: "Vous n'avez pas les permissions pour voir ce document.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (documentUrl) {
+      window.open(documentUrl, '_blank');
+    } else {
+      toast({
+        title: "Document non disponible",
+        description: "Impossible d'ouvrir le document en ligne.",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
@@ -77,7 +169,7 @@ export function DocumentViewer({ document, isOpen, onClose }: DocumentViewerProp
               <div className="space-y-1 text-sm">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Type:</span>
-                  <span>{document.type}</span>
+                  <span>{document.document_type || document.type}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Statut:</span>
@@ -85,11 +177,55 @@ export function DocumentViewer({ document, isOpen, onClose }: DocumentViewerProp
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Créé le:</span>
-                  <span>{document.createdAt}</span>
+                  <span>{new Date(document.created_at || document.createdAt).toLocaleDateString('fr-FR')}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Créé par:</span>
-                  <span>{document.createdBy}</span>
+                  <span>{document.createdBy || 'Utilisateur'}</span>
+                </div>
+                {document.file_size && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Taille:</span>
+                    <span>{(document.file_size / 1024 / 1024).toFixed(2)} MB</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <h4 className="font-medium">Permissions</h4>
+              <div className="space-y-1 text-sm">
+                <div className="flex items-center gap-2">
+                  {permissions.canView ? (
+                    <CheckCircle2 className="h-3 w-3 text-green-600" />
+                  ) : (
+                    <AlertCircle className="h-3 w-3 text-red-600" />
+                  )}
+                  <span>Visualisation</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {permissions.canDownload ? (
+                    <CheckCircle2 className="h-3 w-3 text-green-600" />
+                  ) : (
+                    <AlertCircle className="h-3 w-3 text-red-600" />
+                  )}
+                  <span>Téléchargement</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {permissions.canEdit ? (
+                    <CheckCircle2 className="h-3 w-3 text-green-600" />
+                  ) : (
+                    <AlertCircle className="h-3 w-3 text-red-600" />
+                  )}
+                  <span>Modification</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {permissions.canSign ? (
+                    <CheckCircle2 className="h-3 w-3 text-green-600" />
+                  ) : (
+                    <AlertCircle className="h-3 w-3 text-red-600" />
+                  )}
+                  <span>Signature</span>
                 </div>
               </div>
             </div>
@@ -149,12 +285,24 @@ export function DocumentViewer({ document, isOpen, onClose }: DocumentViewerProp
           {/* Actions */}
           <div className="flex justify-between">
             <div className="flex gap-2">
+              <Button variant="outline" onClick={handleViewOnline} className="gap-2" disabled={!permissions.canView}>
+                <ExternalLink className="h-4 w-4" />
+                Ouvrir en ligne
+              </Button>
+              
               <Button variant="outline" onClick={handleDownload} className="gap-2">
                 <Download className="h-4 w-4" />
                 Télécharger
               </Button>
               
-              {document.status === "pending" && (
+              {permissions.canEdit && (
+                <Button variant="outline" onClick={handleEdit} className="gap-2">
+                  <Edit className="h-4 w-4" />
+                  Modifier
+                </Button>
+              )}
+              
+              {permissions.canSign && (
                 <Button variant="ulpgl" onClick={handleSign} className="gap-2">
                   <PenTool className="h-4 w-4" />
                   Signer le document
