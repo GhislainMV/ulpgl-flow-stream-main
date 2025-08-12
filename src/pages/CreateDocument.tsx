@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +10,9 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { toast } from "@/components/ui/use-toast";
 import { useNavigate } from "react-router-dom";
 import { DocumentUpload } from "@/components/DocumentUpload";
-import { DocumentService } from "@/lib/documentService";
+import { DocumentService, DocumentFile } from "@/lib/documentService";
+import { TemplateService, DocumentTemplate, PlaceholderData } from "@/lib/templateService";
+import { SignatureWorkflowService } from "@/lib/signatureWorkflow";
 import { FileText, Users, Download, Send, PenTool, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
@@ -65,6 +68,9 @@ export default function CreateDocument() {
   const { t } = useLanguage();
   const navigate = useNavigate();
   const [selectedType, setSelectedType] = useState("");
+  const [availableTemplates, setAvailableTemplates] = useState<DocumentTemplate[]>([]);
+  const [selectedTemplate, setSelectedTemplate] = useState<DocumentTemplate | null>(null);
+  const [useTemplate, setUseTemplate] = useState(false);
   const [formData, setFormData] = useState({
     title: "",
     description: "",
@@ -78,7 +84,28 @@ export default function CreateDocument() {
     academicYear: "2024-2025"
   });
 
-  const selectedTemplate = documentTypes.find(doc => doc.id === selectedType);
+  useEffect(() => {
+    loadAvailableTemplates();
+  }, []);
+
+  useEffect(() => {
+    if (selectedType) {
+      checkTemplateAvailability();
+    }
+  }, [selectedType]);
+
+  const loadAvailableTemplates = async () => {
+    const templates = await TemplateService.getAvailableTemplates();
+    setAvailableTemplates(templates);
+  };
+
+  const checkTemplateAvailability = async () => {
+    const template = await TemplateService.getTemplateByType(selectedType);
+    setSelectedTemplate(template);
+    setUseTemplate(!!template);
+  };
+
+  const selectedDocumentType = documentTypes.find(doc => doc.id === selectedType);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -101,19 +128,10 @@ export default function CreateDocument() {
       return;
     }
     
-    // Simuler la création du document
-    toast({
-      title: "Document créé avec succès",
-      description: `Le document "${formData.title}" a été créé et sauvegardé en brouillon.`,
-    });
-    
-    // Rediriger vers la liste des documents
-    setTimeout(() => {
-      navigate("/documents");
-    }, 1500);
+    createDocument(false);
   };
 
-  const handleSendDocument = () => {
+  const handleSendDocument = async () => {
     if (!selectedType || !formData.title.trim()) {
       toast({
         title: "Erreur",
@@ -123,21 +141,83 @@ export default function CreateDocument() {
       return;
     }
     
-    toast({
-      title: "Document envoyé",
-      description: `Le document "${formData.title}" a été créé et envoyé pour signature.`,
-    });
-    
-    setTimeout(() => {
-      navigate("/documents");
-    }, 1500);
+    await createDocument(true);
+  };
+
+  const createDocument = async (sendForSignature: boolean) => {
+    try {
+      let filePath: string | null = null;
+
+      if (useTemplate && selectedTemplate) {
+        // Utiliser un template
+        const placeholderData: PlaceholderData = {
+          '{{date}}': new Date().toLocaleDateString('fr-FR'),
+          '{{annee_academique}}': formData.academicYear,
+          '{{nom_etudiant}}': formData.studentName,
+          '{{numero_etudiant}}': formData.studentId,
+          '{{nom_enseignant}}': formData.teacherName,
+          '{{matiere}}': formData.subject,
+          '{{heures}}': formData.hours,
+          '{{titre}}': formData.title,
+          '{{contenu}}': formData.description
+        };
+
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error('Utilisateur non authentifié');
+
+        filePath = await TemplateService.generateDocumentFromTemplate(
+          selectedTemplate.id,
+          placeholderData,
+          formData.title,
+          user.id
+        );
+      }
+
+      // Créer l'entrée en base de données
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Utilisateur non authentifié');
+
+      const { data: document, error } = await supabase
+        .from('documents')
+        .insert({
+          title: formData.title,
+          description: formData.description,
+          document_type: selectedType,
+          file_path: filePath,
+          status: sendForSignature ? 'pending_signature' : 'draft',
+          created_by: user.id
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Si envoi pour signature, initialiser le workflow
+      if (sendForSignature && document) {
+        await SignatureWorkflowService.initializeWorkflow(document.id, selectedType);
+      }
+
+      toast({
+        title: sendForSignature ? "Document envoyé pour signature" : "Document créé avec succès",
+        description: `Le document "${formData.title}" a été ${sendForSignature ? 'envoyé dans le workflow de signature' : 'sauvegardé en brouillon'}.`,
+      });
+
+      setTimeout(() => {
+        navigate("/documents");
+      }, 1500);
+
+    } catch (error) {
+      console.error('Erreur création document:', error);
+      toast({
+        title: "Erreur de création",
+        description: "Impossible de créer le document.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleSaveDraft = () => {
-    toast({
-      title: "Brouillon sauvegardé",
-      description: "Le document a été sauvegardé en brouillon.",
-    });
+    createDocument(false);
   };
 
   const handleAddSignature = () => {
@@ -277,6 +357,12 @@ export default function CreateDocument() {
               >
                 <h4 className="font-medium text-sm mb-1">{doc.title}</h4>
                 <p className="text-xs text-muted-foreground mb-2">{doc.description}</p>
+                {availableTemplates.some(t => t.document_type === doc.id) && (
+                  <div className="flex items-center gap-1 text-xs text-green-600 mb-1">
+                    <FileText className="h-3 w-3" />
+                    Template disponible
+                  </div>
+                )}
                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Users className="h-3 w-3" />
                   {doc.workflow.length} étapes de signature
@@ -291,11 +377,13 @@ export default function CreateDocument() {
           <CardHeader>
             <CardTitle>Détails du document</CardTitle>
             <CardDescription>
-              {selectedTemplate ? `Modèle: ${selectedTemplate.template}` : "Sélectionnez un type de document"}
+              {selectedDocumentType ? 
+                (selectedTemplate ? `Template: ${selectedTemplate.name}` : `Type: ${selectedDocumentType.title}`) 
+                : "Sélectionnez un type de document"}
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {!selectedTemplate ? (
+            {!selectedDocumentType ? (
               <div className="flex items-center justify-center h-64 text-muted-foreground">
                 <div className="text-center">
                   <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
@@ -304,6 +392,17 @@ export default function CreateDocument() {
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="space-y-6">
+                {/* Template Selection */}
+                {selectedTemplate && (
+                  <Alert>
+                    <FileText className="h-4 w-4" />
+                    <AlertDescription>
+                      <strong>Template détecté:</strong> {selectedTemplate.name}<br />
+                      <strong>Placeholders disponibles:</strong> {selectedTemplate.placeholders.join(', ')}
+                    </AlertDescription>
+                  </Alert>
+                )}
+
                 {/* Basic Info */}
                 <div className="space-y-4">
                   <div>
@@ -312,7 +411,7 @@ export default function CreateDocument() {
                       id="title"
                       value={formData.title}
                       onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                      placeholder={`${selectedTemplate.title} - ${new Date().toLocaleDateString()}`}
+                      placeholder={`${selectedDocumentType.title} - ${new Date().toLocaleDateString()}`}
                       required
                     />
                   </div>
@@ -340,17 +439,17 @@ export default function CreateDocument() {
                 <div className="space-y-3">
                   <Label>Workflow de signature</Label>
                   <div className="flex flex-wrap gap-2">
-                    {selectedTemplate.workflow.map((step, index) => (
+                    {selectedDocumentType.workflow.map((step, index) => (
                       <Badge key={index} variant="outline" className="text-xs">
                         {index + 1}. {step}
                       </Badge>
                     ))}
                   </div>
-                  {selectedTemplate.restrictedRoles.length > 0 && (
+                  {selectedDocumentType.restrictedRoles.length > 0 && (
                     <Alert>
                       <AlertCircle className="h-4 w-4" />
                       <AlertDescription className="text-xs">
-                        Accès restreint pour: {selectedTemplate.restrictedRoles.join(", ")}
+                        Accès restreint pour: {selectedDocumentType.restrictedRoles.join(", ")}
                       </AlertDescription>
                     </Alert>
                   )}

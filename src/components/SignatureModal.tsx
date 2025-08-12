@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { SignatureWorkflowService } from "@/lib/signatureWorkflow";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -22,22 +23,25 @@ export function SignatureModal({ document, isOpen, onClose, onSign }: SignatureM
     setIsLoading(true);
     
     try {
-      // Simuler la signature
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Utilisateur non authentifié');
       
-      onSign(document.id, comments);
+      const success = await SignatureWorkflowService.signDocument(
+        document.id,
+        user.id,
+        comments
+      );
       
-      toast({
-        title: "Document signé avec succès",
-        description: `Le document "${document.title}" a été signé et transmis à l'étape suivante.`,
-      });
-      
-      onClose();
-      setComments("");
+      if (success) {
+        onSign(document.id, comments);
+        onClose();
+        setComments("");
+      }
     } catch (error) {
+      console.error('Erreur signature:', error);
       toast({
         title: "Erreur lors de la signature",
-        description: "Une erreur s'est produite. Veuillez réessayer.",
+        description: error.message || "Une erreur s'est produite. Veuillez réessayer.",
         variant: "destructive",
       });
     } finally {
@@ -49,21 +53,24 @@ export function SignatureModal({ document, isOpen, onClose, onSign }: SignatureM
     setIsLoading(true);
     
     try {
-      // Simuler le rejet
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Utilisateur non authentifié');
       
-      toast({
-        title: "Document rejeté",
-        description: `Le document "${document.title}" a été rejeté et renvoyé au créateur.`,
-        variant: "destructive",
-      });
+      const success = await SignatureWorkflowService.rejectDocument(
+        document.id,
+        user.id,
+        comments || "Aucune raison spécifiée"
+      );
       
-      onClose();
-      setComments("");
+      if (success) {
+        onClose();
+        setComments("");
+      }
     } catch (error) {
+      console.error('Erreur rejet:', error);
       toast({
         title: "Erreur lors du rejet",
-        description: "Une erreur s'est produite. Veuillez réessayer.",
+        description: error.message || "Une erreur s'est produite. Veuillez réessayer.",
         variant: "destructive",
       });
     } finally {

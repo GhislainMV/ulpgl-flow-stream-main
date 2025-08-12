@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useEffect } from "react";
+import { SignatureWorkflowService, DocumentWorkflow } from "@/lib/signatureWorkflow";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -35,11 +36,13 @@ export function DocumentViewer({ document, isOpen, onClose }: DocumentViewerProp
   });
   const [documentUrl, setDocumentUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [workflow, setWorkflow] = useState<DocumentWorkflow | null>(null);
 
   useEffect(() => {
     if (document?.id && isOpen) {
       loadDocumentPermissions();
       loadDocumentUrl();
+      loadDocumentWorkflow();
     }
   }, [document?.id, isOpen]);
 
@@ -62,6 +65,17 @@ export function DocumentViewer({ document, isOpen, onClose }: DocumentViewerProp
       setDocumentUrl(url);
     } catch (error) {
       console.error('Erreur génération URL:', error);
+    }
+  };
+
+  const loadDocumentWorkflow = async () => {
+    if (!document?.id) return;
+    
+    try {
+      const workflowData = await SignatureWorkflowService.getDocumentWorkflow(document.id);
+      setWorkflow(workflowData);
+    } catch (error) {
+      console.error('Erreur chargement workflow:', error);
     }
   };
 
@@ -247,37 +261,52 @@ export function DocumentViewer({ document, isOpen, onClose }: DocumentViewerProp
           {/* Workflow de signature */}
           <div className="space-y-4">
             <h4 className="font-medium">Workflow de signature</h4>
-            <div className="space-y-3">
-              {document.workflow?.map((step: any, index: number) => (
-                <div key={index} className="flex items-center gap-3 p-3 border rounded-lg">
-                  <div className="flex-shrink-0">
-                    {step.status === "completed" ? (
-                      <CheckCircle2 className="h-5 w-5 text-green-600" />
-                    ) : step.status === "pending" ? (
-                      <Clock className="h-5 w-5 text-orange-600" />
-                    ) : (
-                      <AlertCircle className="h-5 w-5 text-gray-400" />
-                    )}
-                  </div>
-                  
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium">{step.step}</span>
-                      <Badge variant={step.status === "completed" ? "default" : "outline"}>
-                        {step.status === "completed" ? "Terminé" : 
-                         step.status === "pending" ? "En cours" : "En attente"}
-                      </Badge>
+            {workflow ? (
+              <div className="space-y-3">
+                {workflow.steps.map((step, index) => (
+                  <div key={index} className="flex items-center gap-3 p-3 border rounded-lg">
+                    <div className="flex-shrink-0">
+                      {step.status === "signed" ? (
+                        <CheckCircle2 className="h-5 w-5 text-green-600" />
+                      ) : step.status === "pending" ? (
+                        <Clock className="h-5 w-5 text-orange-600" />
+                      ) : step.status === "rejected" ? (
+                        <AlertCircle className="h-5 w-5 text-red-600" />
+                      ) : (
+                        <AlertCircle className="h-5 w-5 text-gray-400" />
+                      )}
                     </div>
-                    {step.date && (
-                      <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
-                        <Calendar className="h-3 w-3" />
-                        {step.date}
+                    
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium capitalize">{step.role}</span>
+                        <Badge variant={step.status === "signed" ? "default" : step.status === "rejected" ? "destructive" : "outline"}>
+                          {step.status === "signed" ? "Signé" : 
+                           step.status === "pending" ? "En attente" : 
+                           step.status === "rejected" ? "Rejeté" : "En attente"}
+                        </Badge>
                       </div>
-                    )}
+                      {step.signed_at && (
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
+                          <Calendar className="h-3 w-3" />
+                          {new Date(step.signed_at).toLocaleDateString('fr-FR')} à {new Date(step.signed_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      )}
+                      {step.comments && (
+                        <div className="text-xs text-muted-foreground mt-1">
+                          <strong>Commentaire:</strong> {step.comments}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-4 text-muted-foreground">
+                <Clock className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p>Chargement du workflow...</p>
+              </div>
+            )}
           </div>
 
           <Separator />
