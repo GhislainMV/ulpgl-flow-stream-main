@@ -18,7 +18,7 @@ export interface SignatureData {
   signer_id: string;
   signer_name: string;
   signer_role: string;
-  signature_image?: string;
+  signature_text: string;
   signed_at?: string;
 }
 
@@ -28,26 +28,48 @@ export class TemplateService {
   private static readonly GENERATED_PATH = 'generated/';
   private static readonly SIGNED_PATH = 'signed/';
 
+  // Templates spécifiques disponibles
+  private static readonly AVAILABLE_TEMPLATES = {
+    'releve_notes': {
+      file: 'releve_de_notes.pdf.docx',
+      placeholders: [
+        '{{nom_etudiant}}', '{{numero_etudiant}}', '{{faculte}}', 
+        '{{promotion}}', '{{annee_academique}}', '{{date}}',
+        '{{signature_saf}}', '{{signature_libraire}}', '{{signature_comptable}}',
+        '{{signature_bibliothecaire}}', '{{signature_doyen}}'
+      ]
+    },
+    'lettre_honoraires': {
+      file: 'lettre_honoraires.pdf.docx',
+      placeholders: [
+        '{{nom_enseignant}}', '{{matiere}}', '{{heures}}', 
+        '{{periode}}', '{{montant}}', '{{date}}', '{{nom_cp}}',
+        '{{signature_cp}}', '{{signature_doyen}}', '{{signature_sgac}}'
+      ]
+    }
+  };
+
   // Récupérer les templates disponibles
   static async getAvailableTemplates(): Promise<DocumentTemplate[]> {
     try {
-      const { data: files, error } = await supabase.storage
-        .from(this.TEMPLATE_BUCKET)
-        .list(this.TEMPLATE_PATH);
-
-      if (error) throw error;
-
       const templates: DocumentTemplate[] = [];
       
-      for (const file of files || []) {
-        if (file.name.endsWith('.docx') || file.name.endsWith('.doc')) {
+      for (const [type, config] of Object.entries(this.AVAILABLE_TEMPLATES)) {
+        // Vérifier si le template existe dans le storage
+        const { data, error } = await supabase.storage
+          .from(this.TEMPLATE_BUCKET)
+          .list(this.TEMPLATE_PATH, {
+            search: config.file
+          });
+
+        if (!error && data && data.length > 0) {
           const template: DocumentTemplate = {
-            id: file.name,
-            name: file.name.replace(/\.(docx|doc)$/, ''),
-            document_type: this.extractDocumentType(file.name),
-            file_path: `${this.TEMPLATE_PATH}${file.name}`,
-            placeholders: await this.extractPlaceholders(file.name),
-            created_at: file.created_at || new Date().toISOString()
+            id: config.file,
+            name: config.file.replace(/\.(pdf\.)?docx$/, ''),
+            document_type: type,
+            file_path: `${this.TEMPLATE_PATH}${config.file}`,
+            placeholders: config.placeholders,
+            created_at: new Date().toISOString()
           };
           templates.push(template);
         }
@@ -60,46 +82,21 @@ export class TemplateService {
     }
   }
 
-  // Extraire le type de document depuis le nom du fichier
-  private static extractDocumentType(fileName: string): string {
-    const name = fileName.toLowerCase();
-    if (name.includes('releve') || name.includes('notes')) return 'releve_notes';
-    if (name.includes('honoraires') || name.includes('enseignant')) return 'lettre_honoraires';
-    if (name.includes('conseil') || name.includes('pv')) return 'pv_conseil';
-    if (name.includes('correspondance')) return 'correspondance';
-    return 'autre';
-  }
-
-  // Extraire les placeholders d'un template (simulation)
-  private static async extractPlaceholders(fileName: string): Promise<string[]> {
-    // En réalité, il faudrait parser le document Word pour extraire les {{placeholders}}
-    // Pour la démo, on retourne des placeholders basés sur le type
-    const type = this.extractDocumentType(fileName);
-    
-    const commonPlaceholders = ['{{date}}', '{{annee_academique}}'];
-    
-    switch (type) {
-      case 'releve_notes':
-        return [...commonPlaceholders, '{{nom_etudiant}}', '{{numero_etudiant}}', '{{faculte}}', '{{promotion}}'];
-      case 'lettre_honoraires':
-        return [...commonPlaceholders, '{{nom_enseignant}}', '{{matiere}}', '{{heures}}', '{{montant}}'];
-      case 'pv_conseil':
-        return [...commonPlaceholders, '{{date_reunion}}', '{{participants}}', '{{ordre_jour}}'];
-      default:
-        return [...commonPlaceholders, '{{titre}}', '{{contenu}}'];
-    }
-  }
-
   // Générer un document depuis un template
   static async generateDocumentFromTemplate(
-    templateId: string,
+    templateType: string,
     placeholderData: PlaceholderData,
     documentTitle: string,
     createdBy: string
   ): Promise<string | null> {
     try {
+      const config = this.AVAILABLE_TEMPLATES[templateType as keyof typeof this.AVAILABLE_TEMPLATES];
+      if (!config) {
+        throw new Error(`Template non trouvé pour le type: ${templateType}`);
+      }
+
       // 1. Télécharger le template depuis Supabase
-      const templatePath = `${this.TEMPLATE_PATH}${templateId}`;
+      const templatePath = `${this.TEMPLATE_PATH}${config.file}`;
       const { data: templateFile, error: downloadError } = await supabase.storage
         .from(this.TEMPLATE_BUCKET)
         .download(templatePath);
@@ -108,7 +105,7 @@ export class TemplateService {
 
       // 2. Simuler le remplacement des placeholders
       // En réalité, il faudrait utiliser une librairie comme docxtemplater
-      const processedContent = await this.replacePlaceholders(templateFile, placeholderData);
+      const processedContent = await this.replacePlaceholders(templateFile, placeholderData, config.placeholders);
 
       // 3. Générer un nom unique pour le document
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -141,20 +138,28 @@ export class TemplateService {
     }
   }
 
-  // Remplacer les placeholders dans le contenu (simulation)
+  // Remplacer les placeholders dans le contenu
   private static async replacePlaceholders(
     templateFile: Blob,
-    placeholderData: PlaceholderData
+    placeholderData: PlaceholderData,
+    availablePlaceholders: string[]
   ): Promise<Blob> {
-    // En réalité, il faudrait utiliser docxtemplater ou une librairie similaire
-    // Pour la démo, on retourne le fichier original
-    // 
-    // Exemple d'implémentation réelle :
-    // const zip = new PizZip(await templateFile.arrayBuffer());
-    // const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
-    // doc.setData(placeholderData);
-    // doc.render();
-    // return new Blob([doc.getZip().generate({ type: 'arraybuffer' })]);
+    // Simulation du remplacement des placeholders
+    // En production, utiliser docxtemplater ou une librairie similaire
+    
+    // Créer les données avec tous les placeholders
+    const completeData = { ...placeholderData };
+    
+    // Ajouter les placeholders manquants avec des valeurs vides
+    availablePlaceholders.forEach(placeholder => {
+      const key = placeholder.replace(/[{}]/g, '');
+      if (!completeData[key]) {
+        completeData[key] = ''; // Laisser vide si non fourni
+      }
+    });
+
+    // Remplacer les traits de soulignement et pointillés par les valeurs
+    // Cette logique serait implémentée avec docxtemplater en production
     
     return templateFile;
   }
@@ -210,18 +215,18 @@ export class TemplateService {
     }
   }
 
-  // Insérer les signatures dans le document (simulation)
+  // Insérer les signatures dans le document
   private static async insertSignatures(
     documentFile: Blob,
     signatures: SignatureData[]
   ): Promise<Blob> {
-    // En réalité, il faudrait :
-    // 1. Parser le document Word
-    // 2. Trouver les placeholders de signature ({{signature_doyen}}, etc.)
-    // 3. Les remplacer par les images de signature
-    // 4. Ajouter les informations de signature (nom, date, etc.)
+    // En production, remplacer les placeholders de signature par "OK SIGNÉ"
+    // avec docxtemplater ou une librairie similaire
     
-    // Pour la démo, on retourne le fichier original
+    // Exemple de logique :
+    // - {{signature_saf}} → "OK SIGNÉ - SAF - [Date]"
+    // - {{signature_doyen}} → "OK SIGNÉ - DOYEN - [Date]"
+    
     return documentFile;
   }
 
@@ -230,15 +235,10 @@ export class TemplateService {
     wordPath: string,
     wordContent: Blob
   ): Promise<string> {
-    // En réalité, il faudrait convertir le Word en PDF
-    // Cela peut se faire avec des services comme :
-    // - LibreOffice en ligne de commande
-    // - API de conversion (CloudConvert, etc.)
-    // - Bibliothèques Node.js spécialisées
-    
     const pdfPath = wordPath.replace('.docx', '.pdf');
     
-    // Simulation : on upload le même contenu avec extension PDF
+    // En production, convertir le Word en PDF
+    // Pour la simulation, on upload le même contenu avec extension PDF
     await supabase.storage
       .from(this.TEMPLATE_BUCKET)
       .upload(pdfPath, wordContent, {
@@ -250,14 +250,22 @@ export class TemplateService {
 
   // Vérifier si un template existe pour un type de document
   static async hasTemplateForType(documentType: string): Promise<boolean> {
-    const templates = await this.getAvailableTemplates();
-    return templates.some(t => t.document_type === documentType);
+    return documentType in this.AVAILABLE_TEMPLATES;
   }
 
   // Récupérer un template spécifique
   static async getTemplateByType(documentType: string): Promise<DocumentTemplate | null> {
-    const templates = await this.getAvailableTemplates();
-    return templates.find(t => t.document_type === documentType) || null;
+    const config = this.AVAILABLE_TEMPLATES[documentType as keyof typeof this.AVAILABLE_TEMPLATES];
+    if (!config) return null;
+
+    return {
+      id: config.file,
+      name: config.file.replace(/\.(pdf\.)?docx$/, ''),
+      document_type: documentType,
+      file_path: `${this.TEMPLATE_PATH}${config.file}`,
+      placeholders: config.placeholders,
+      created_at: new Date().toISOString()
+    };
   }
 
   // Créer une URL temporaire pour téléchargement
@@ -275,20 +283,20 @@ export class TemplateService {
     }
   }
 
-  // Archiver un document (le rendre non modifiable)
-  static async archiveDocument(filePath: string): Promise<boolean> {
-    try {
-      // En réalité, on pourrait :
-      // 1. Déplacer vers un bucket d'archives
-      // 2. Changer les permissions
-      // 3. Ajouter des métadonnées d'archivage
-      
-      // Pour la démo, on simule l'archivage
-      console.log(`Document archivé: ${filePath}`);
-      return true;
-    } catch (error) {
-      console.error('Erreur archivage:', error);
-      return false;
+  // Vérifier les permissions de création
+  static canCreateDocument(userRole: string, documentType: string): boolean {
+    switch (documentType) {
+      case 'releve_notes':
+        return ['saf', 'appariteur'].includes(userRole);
+      case 'lettre_honoraires':
+        return userRole === 'saf';
+      default:
+        return false;
     }
+  }
+
+  // Vérifier les permissions de visualisation finale
+  static canViewFinalDocument(userRole: string): boolean {
+    return ['saf', 'appariteur', 'receptionniste', 'bibliothecaire'].includes(userRole);
   }
 }

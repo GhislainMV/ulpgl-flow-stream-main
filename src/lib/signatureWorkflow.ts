@@ -9,6 +9,7 @@ export interface WorkflowStep {
   status: 'pending' | 'signed' | 'rejected';
   signed_at?: string;
   comments?: string;
+  optional?: boolean;
 }
 
 export interface DocumentWorkflow {
@@ -19,49 +20,59 @@ export interface DocumentWorkflow {
 }
 
 export class SignatureWorkflowService {
-  // Définir les workflows par type de document
+  // Workflows spécifiques selon les nouvelles règles
   private static readonly WORKFLOWS = {
     releve_notes: [
-      { order: 1, role: 'saf' },
-      { order: 2, role: 'appariteur' },
+      { order: 1, role: 'saf_or_appariteur' }, // Celui qui crée
+      { order: 2, role: 'libraire' },
       { order: 3, role: 'comptable' },
-      { order: 4, role: 'doyen' }
+      { order: 4, role: 'bibliothecaire' },
+      { order: 5, role: 'doyen' }
     ],
     lettre_honoraires: [
-      { order: 1, role: 'saf' },
+      { order: 1, role: 'cp', optional: true }, // Optionnel
       { order: 2, role: 'doyen' },
-      { order: 3, role: 'sgad' },
-      { order: 4, role: 'sgac' },
-      { order: 5, role: 'ab' },
-      { order: 6, role: 'recteur' }
-    ],
-    pv_conseil: [
-      { order: 1, role: 'saf' },
-      { order: 2, role: 'doyen' },
-      { order: 3, role: 'sgac' },
-      { order: 4, role: 'recteur' }
-    ],
-    correspondance: [
-      { order: 1, role: 'saf' },
-      { order: 2, role: 'doyen' }
+      { order: 3, role: 'sgac' }
     ]
   };
 
   // Initialiser un workflow pour un document
   static async initializeWorkflow(
     documentId: string,
-    documentType: string
+    documentType: string,
+    creatorRole: string
   ): Promise<boolean> {
     try {
       const workflowSteps = this.WORKFLOWS[documentType as keyof typeof this.WORKFLOWS] || [];
       
-      // Créer les entrées de signature dans la base
       for (const step of workflowSteps) {
-        // Trouver l'utilisateur avec ce rôle
+        let targetRole = step.role;
+        
+        // Pour le relevé de notes, le premier signataire est le créateur
+        if (step.role === 'saf_or_appariteur') {
+          targetRole = creatorRole; // 'saf' ou 'appariteur'
+        }
+
+        // Trouver l'utilisateur avec ce rôle (sauf si optionnel et pas de CP)
+        if (step.optional && targetRole === 'cp') {
+          // Vérifier s'il y a un CP disponible
+          const { data: cpUsers } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('role', 'cp')
+            .eq('is_active', true)
+            .limit(1);
+
+          if (!cpUsers || cpUsers.length === 0) {
+            // Pas de CP, passer cette étape
+            continue;
+          }
+        }
+
         const { data: users } = await supabase
           .from('profiles')
           .select('id')
-          .eq('role', step.role)
+          .eq('role', targetRole)
           .eq('is_active', true)
           .limit(1);
 
@@ -78,23 +89,21 @@ export class SignatureWorkflowService {
       }
 
       // Mettre à jour le document avec le premier signataire
-      if (workflowSteps.length > 0) {
-        const { data: firstSigner } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('role', workflowSteps[0].role)
-          .eq('is_active', true)
-          .limit(1);
+      const { data: firstSignature } = await supabase
+        .from('signatures')
+        .select('signer_id')
+        .eq('document_id', documentId)
+        .order('signature_order', { ascending: true })
+        .limit(1);
 
-        if (firstSigner && firstSigner.length > 0) {
-          await supabase
-            .from('documents')
-            .update({
-              current_signer: firstSigner[0].id,
-              status: 'pending_signature'
-            })
-            .eq('id', documentId);
-        }
+      if (firstSignature && firstSignature.length > 0) {
+        await supabase
+          .from('documents')
+          .update({
+            current_signer: firstSignature[0].signer_id,
+            status: 'pending_signature'
+          })
+          .eq('id', documentId);
       }
 
       return true;
@@ -111,13 +120,13 @@ export class SignatureWorkflowService {
     comments?: string
   ): Promise<boolean> {
     try {
-      // 1. Marquer la signature comme signée
+      // 1. Marquer la signature comme signée avec "OK SIGNÉ"
       const { error: signError } = await supabase
         .from('signatures')
         .update({
           status: 'signed',
           signed_at: new Date().toISOString(),
-          comments: comments
+          comments: comments || 'OK SIGNÉ'
         })
         .eq('document_id', documentId)
         .eq('signer_id', signerId);
@@ -152,7 +161,7 @@ export class SignatureWorkflowService {
 
       toast({
         title: "Document signé avec succès",
-        description: "Votre signature a été enregistrée et le document a été transmis.",
+        description: "Votre signature 'OK SIGNÉ' a été enregistrée et le document a été transmis.",
       });
 
       return true;
@@ -163,65 +172,6 @@ export class SignatureWorkflowService {
         description: "Impossible d'enregistrer votre signature.",
         variant: "destructive",
       });
-      return false;
-    }
-  }
-
-  // Rejeter un document
-  static async rejectDocument(
-    documentId: string,
-    signerId: string,
-    reason: string
-  ): Promise<boolean> {
-    try {
-      // 1. Marquer la signature comme rejetée
-      await supabase
-        .from('signatures')
-        .update({
-          status: 'rejected',
-          signed_at: new Date().toISOString(),
-          comments: reason
-        })
-        .eq('document_id', documentId)
-        .eq('signer_id', signerId);
-
-      // 2. Mettre à jour le document comme rejeté
-      await supabase
-        .from('documents')
-        .update({
-          status: 'rejected',
-          current_signer: null
-        })
-        .eq('id', documentId);
-
-      // 3. Notifier le créateur du document
-      const { data: document } = await supabase
-        .from('documents')
-        .select('created_by, title')
-        .eq('id', documentId)
-        .single();
-
-      if (document) {
-        await supabase
-          .from('notifications')
-          .insert({
-            user_id: document.created_by,
-            title: 'Document rejeté',
-            message: `Le document "${document.title}" a été rejeté. Raison: ${reason}`,
-            type: 'document_rejected',
-            document_id: documentId
-          });
-      }
-
-      toast({
-        title: "Document rejeté",
-        description: "Le document a été rejeté et renvoyé au créateur.",
-        variant: "destructive",
-      });
-
-      return true;
-    } catch (error) {
-      console.error('Erreur rejet document:', error);
       return false;
     }
   }
@@ -247,11 +197,12 @@ export class SignatureWorkflowService {
 
       if (!document) return;
 
-      // 2. Préparer les données de signature
+      // 2. Préparer les données de signature avec "OK SIGNÉ"
       const signatures: SignatureData[] = document.signatures.map((sig: any) => ({
         signer_id: sig.signer_id,
         signer_name: `${sig.profiles.first_name} ${sig.profiles.last_name}`,
         signer_role: sig.profiles.role,
+        signature_text: 'OK SIGNÉ',
         signed_at: sig.signed_at
       }));
 
@@ -273,21 +224,30 @@ export class SignatureWorkflowService {
         })
         .eq('id', documentId);
 
-      // 5. Archiver le document
-      if (finalPath) {
-        await TemplateService.archiveDocument(finalPath);
-      }
+      // 5. Notifier les acteurs autorisés à télécharger
+      const authorizedRoles = ['saf', 'appariteur', 'receptionniste', 'bibliothecaire'];
+      
+      for (const role of authorizedRoles) {
+        const { data: users } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('role', role)
+          .eq('is_active', true);
 
-      // 6. Notifier le créateur
-      await supabase
-        .from('notifications')
-        .insert({
-          user_id: document.created_by,
-          title: 'Document finalisé',
-          message: `Le document "${document.title}" a été signé par tous les intervenants et est maintenant finalisé.`,
-          type: 'document_completed',
-          document_id: documentId
-        });
+        if (users) {
+          for (const user of users) {
+            await supabase
+              .from('notifications')
+              .insert({
+                user_id: user.id,
+                title: 'Document finalisé disponible',
+                message: `Le document "${document.title}" est maintenant disponible en téléchargement PDF.`,
+                type: 'document_completed',
+                document_id: documentId
+              });
+          }
+        }
+      }
 
     } catch (error) {
       console.error('Erreur finalisation document:', error);

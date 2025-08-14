@@ -22,35 +22,21 @@ const documentTypes = [
   {
     id: "releve_notes",
     title: "Relevé de notes étudiant",
-    description: "Document officiel des notes d'un étudiant",
-    template: "Template_Releve_Notes.docx",
-    workflow: ["SAF/Appariteur", "Libraire", "Comptable", "Bibliothécaire", "Doyen"],
-    restrictedRoles: ["caissiere", "sgad", "sgac", "ab", "dircab", "recteur"]
+    description: "Document officiel des notes d'un étudiant (Créé par SAF ou Appariteur uniquement)",
+    template: "releve_de_notes.pdf.docx",
+    workflow: ["Créateur (SAF/Appariteur)", "Libraire", "Comptable", "Bibliothécaire", "Doyen"],
+    restrictedRoles: ["doyen", "sgac", "sgad", "ab", "dircab", "recteur", "caissiere", "receptionniste", "secretaire_sgac", "secretaire_sgad", "comptable", "bibliothecaire", "libraire", "cp"],
+    allowedCreators: ["saf", "appariteur"]
   },
   {
     id: "lettre_honoraires",
     title: "Lettre d'honoraires enseignant",
-    description: "Fiche de suivi des enseignements et honoraires",
-    template: "Fiche_Suivi_Enseignements.pdf",
-    workflow: ["SAF", "Doyen", "SGAD", "SGAC", "AB", "Recteur", "Caissière (lecture)"],
-    restrictedRoles: []
+    description: "Fiche de suivi des enseignements et honoraires (Créé par SAF uniquement)",
+    template: "lettre_honoraires.pdf.docx",
+    workflow: ["CP (optionnel)", "Doyen", "SGAC"],
+    restrictedRoles: ["doyen", "sgac", "sgad", "ab", "dircab", "recteur", "caissiere", "receptionniste", "secretaire_sgac", "secretaire_sgad", "comptable", "bibliothecaire", "libraire", "cp", "appariteur"],
+    allowedCreators: ["saf"]
   },
-  {
-    id: "pv_conseil",
-    title: "PV Conseil facultaire",
-    description: "Procès-verbal des réunions du conseil",
-    template: "PV_Conseil_Template.docx",
-    workflow: ["SAF", "Doyen", "SGAC", "Recteur"],
-    restrictedRoles: []
-  },
-  {
-    id: "correspondance",
-    title: "Correspondance simple",
-    description: "Document de correspondance administrative",
-    template: "Correspondance_Template.docx",
-    workflow: ["Créateur", "Destinataire(s)"],
-    restrictedRoles: []
-  }
 ];
 
 const allRoles = [
@@ -74,20 +60,43 @@ export default function CreateDocument() {
   const [formData, setFormData] = useState({
     title: "",
     description: "",
-    content: "",
-    recipients: [] as string[],
     studentName: "",
     studentId: "",
+    faculte: "",
+    promotion: "",
     teacherName: "",
     subject: "",
     hours: "",
+    periode: "",
+    montant: "",
+    nomCp: "", // Optionnel pour lettre d'honoraires
     academicYear: "2024-2025"
   });
+  const [userRole, setUserRole] = useState<string>("");
 
   useEffect(() => {
+    loadUserRole();
     loadAvailableTemplates();
   }, []);
 
+  const loadUserRole = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .single();
+        
+        if (profile) {
+          setUserRole(profile.role);
+        }
+      }
+    } catch (error) {
+      console.error('Erreur chargement rôle:', error);
+    }
+  };
   useEffect(() => {
     if (selectedType) {
       checkTemplateAvailability();
@@ -107,6 +116,9 @@ export default function CreateDocument() {
 
   const selectedDocumentType = documentTypes.find(doc => doc.id === selectedType);
 
+  // Vérifier si l'utilisateur peut créer ce type de document
+  const canCreateSelectedType = selectedDocumentType ? 
+    selectedDocumentType.allowedCreators.includes(userRole) : false;
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -146,6 +158,16 @@ export default function CreateDocument() {
 
   const createDocument = async (sendForSignature: boolean) => {
     try {
+      // Vérifier les permissions
+      if (!canCreateSelectedType) {
+        toast({
+          title: "Accès refusé",
+          description: `Seuls les rôles ${selectedDocumentType?.allowedCreators.join(', ')} peuvent créer ce type de document.`,
+          variant: "destructive",
+        });
+        return;
+      }
+
       let filePath: string | null = null;
 
       if (useTemplate && selectedTemplate) {
@@ -155,18 +177,22 @@ export default function CreateDocument() {
           '{{annee_academique}}': formData.academicYear,
           '{{nom_etudiant}}': formData.studentName,
           '{{numero_etudiant}}': formData.studentId,
+          '{{faculte}}': formData.faculte,
+          '{{promotion}}': formData.promotion,
           '{{nom_enseignant}}': formData.teacherName,
           '{{matiere}}': formData.subject,
           '{{heures}}': formData.hours,
-          '{{titre}}': formData.title,
-          '{{contenu}}': formData.description
+          '{{periode}}': formData.periode,
+          '{{montant}}': formData.montant,
+          '{{nom_cp}}': formData.nomCp || '', // Laisser vide si non fourni
+          '{{titre}}': formData.title
         };
 
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) throw new Error('Utilisateur non authentifié');
 
         filePath = await TemplateService.generateDocumentFromTemplate(
-          selectedTemplate.id,
+          selectedType,
           placeholderData,
           formData.title,
           user.id
@@ -194,7 +220,7 @@ export default function CreateDocument() {
 
       // Si envoi pour signature, initialiser le workflow
       if (sendForSignature && document) {
-        await SignatureWorkflowService.initializeWorkflow(document.id, selectedType);
+        await SignatureWorkflowService.initializeWorkflow(document.id, selectedType, userRole);
       }
 
       toast({
@@ -240,6 +266,7 @@ export default function CreateDocument() {
                   value={formData.studentName}
                   onChange={(e) => setFormData({ ...formData, studentName: e.target.value })}
                   placeholder="Jean KABILA"
+                  required
                 />
               </div>
               <div>
@@ -249,6 +276,29 @@ export default function CreateDocument() {
                   value={formData.studentId}
                   onChange={(e) => setFormData({ ...formData, studentId: e.target.value })}
                   placeholder="UL2024001"
+                  required
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="faculte">Faculté *</Label>
+                <Input
+                  id="faculte"
+                  value={formData.faculte}
+                  onChange={(e) => setFormData({ ...formData, faculte: e.target.value })}
+                  placeholder="Faculté des Sciences"
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="promotion">Promotion *</Label>
+                <Input
+                  id="promotion"
+                  value={formData.promotion}
+                  onChange={(e) => setFormData({ ...formData, promotion: e.target.value })}
+                  placeholder="L1, L2, L3..."
+                  required
                 />
               </div>
             </div>
@@ -279,6 +329,7 @@ export default function CreateDocument() {
                   value={formData.teacherName}
                   onChange={(e) => setFormData({ ...formData, teacherName: e.target.value })}
                   placeholder="Dr. MUKENDI"
+                  required
                 />
               </div>
               <div>
@@ -288,18 +339,53 @@ export default function CreateDocument() {
                   value={formData.subject}
                   onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
                   placeholder="Informatique Appliquée"
+                  required
                 />
               </div>
             </div>
-            <div>
-              <Label htmlFor="hours">Nombre d'heures</Label>
-              <Input
-                id="hours"
-                type="number"
-                value={formData.hours}
-                onChange={(e) => setFormData({ ...formData, hours: e.target.value })}
-                placeholder="60"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="hours">Nombre d'heures *</Label>
+                <Input
+                  id="hours"
+                  type="number"
+                  value={formData.hours}
+                  onChange={(e) => setFormData({ ...formData, hours: e.target.value })}
+                  placeholder="60"
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="periode">Période *</Label>
+                <Input
+                  id="periode"
+                  value={formData.periode}
+                  onChange={(e) => setFormData({ ...formData, periode: e.target.value })}
+                  placeholder="Janvier - Juin 2024"
+                  required
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="montant">Montant *</Label>
+                <Input
+                  id="montant"
+                  value={formData.montant}
+                  onChange={(e) => setFormData({ ...formData, montant: e.target.value })}
+                  placeholder="150000 FC"
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="nomCp">Nom du CP (optionnel)</Label>
+                <Input
+                  id="nomCp"
+                  value={formData.nomCp}
+                  onChange={(e) => setFormData({ ...formData, nomCp: e.target.value })}
+                  placeholder="Laisser vide si pas de CP"
+                />
+              </div>
             </div>
           </div>
         );
@@ -392,6 +478,17 @@ export default function CreateDocument() {
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="space-y-6">
+                {/* Vérification des permissions */}
+                {selectedDocumentType && !canCreateSelectedType && (
+                  <Alert>
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>
+                      <strong>Accès restreint :</strong> Seuls les rôles {selectedDocumentType.allowedCreators.join(', ')} peuvent créer ce type de document.
+                      Votre rôle actuel : {userRole}
+                    </AlertDescription>
+                  </Alert>
+                )}
+
                 {/* Template Selection */}
                 {selectedTemplate && (
                   <Alert>
@@ -449,7 +546,7 @@ export default function CreateDocument() {
                     <Alert>
                       <AlertCircle className="h-4 w-4" />
                       <AlertDescription className="text-xs">
-                        Accès restreint pour: {selectedDocumentType.restrictedRoles.join(", ")}
+                        Visualisation finale limitée aux rôles : SAF, Appariteur, Réceptionniste, Bibliothécaire
                       </AlertDescription>
                     </Alert>
                   )}
@@ -464,6 +561,8 @@ export default function CreateDocument() {
                     Créer et envoyer
                   </Button>
                   <Button type="button" onClick={handleSaveDraft} variant="outline" className="gap-2">
+                    disabled={!canCreateSelectedType}
+                    disabled={!canCreateSelectedType}
                     <Download className="h-4 w-4" />
                     Enregistrer brouillon
                   </Button>
@@ -471,7 +570,7 @@ export default function CreateDocument() {
                     <PenTool className="h-4 w-4" />
                     Ajouter signature
                   </Button>
-                  <Button type="submit" variant="outline" className="gap-2">
+                  <Button type="submit" variant="outline" className="gap-2" disabled={!canCreateSelectedType}>
                     <FileText className="h-4 w-4" />
                     Sauvegarder
                   </Button>
